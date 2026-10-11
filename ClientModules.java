@@ -302,6 +302,12 @@ public final class ClientModules {
         Setting.Action preview = action("Play sound", () -> play(1.0f));
         Setting.Num fileVolume = num("Custom file volume (%)", 80, 5, 100, 5);
         Setting.Bool fileVary = bool("Custom file: pitch follows action", true);
+        Setting.Bool splash = bool("Startup splash", true);
+        Setting.Num splashLen = num("Splash length (s)", 2.5, 1, 6, 0.5);
+        Setting.Action previewSplash = action("Preview splash", () -> {
+            var c = MinecraftClient.getInstance();
+            c.setScreen(new nova.gui.SplashScreen(c.currentScreen));
+        });
 
         private static final class Pcm { byte[] data; AudioFormat fmt; long modified; }
         private static final Map<String, Pcm> PCM = new HashMap<>();
@@ -310,6 +316,9 @@ public final class ClientModules {
         public Gui() { super("GUI", Category.CLIENT, "Sounds of this menu (own sounds: config/nova/sounds)."); INSTANCE = this; scan(); }
 
         public static boolean sounds() { return INSTANCE == null || INSTANCE.sounds.get(); }
+        public static boolean splashOn() { return INSTANCE == null || INSTANCE.splash.get(); }
+        public static float splashSeconds() { return INSTANCE == null ? 2.5f : (float) INSTANCE.splashLen.get(); }
+        public static int customSoundCount() { return INSTANCE == null ? 0 : Math.max(0, INSTANCE.sound.modes.length - PRESETS.length); }
 
         private static Path dir() { return FabricLoader.getInstance().getConfigDir().resolve("nova").resolve("sounds"); }
 

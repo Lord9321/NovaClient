@@ -4,7 +4,7 @@ Fabric, Minecraft 1.21.11. Open the GUI with **Right Shift**.
 
 ## Build
 1. https://fabricmc.net/develop -> 1.21.11, copy exact versions into `gradle.properties`.
-2. JDK 21, `gradle build` (needs Gradle 9.x; or `./gradlew build` if you have the wrapper). After building, check the jar is not empty: `unzip -l build/libs/nova-client-2.7.3.jar` must list `fabric.mod.json` and `nova/*.class`. Jar: `build/libs/nova-client-2.7.3.jar` (not `-sources`). Put it in `mods/` with Fabric API.
+2. JDK 21, `gradle build` (needs Gradle 9.x; or `./gradlew build` if you have the wrapper). After building, check the jar is not empty: `unzip -l build/libs/nova-client-2.7.4.jar` must list `fabric.mod.json` and `nova/*.class`. Jar: `build/libs/nova-client-2.7.4.jar` (not `-sources`). Put it in `mods/` with Fabric API.
 
 ## GUI
 Icon tabs on the left, module cards in two columns. Left click = toggle, right click = fold out settings,
@@ -19,6 +19,9 @@ It turns smoothly to each face (Aim speed / Max turn), only clicks when the cros
 "Load into Litematica" (default on) hands the loaded file + origin + rotation to Litematica as a placement, so Litematica renders it (needs the Litematica mod; it follows origin/rotation/offset changes and is removed on Unload).
 "Built-in preview" is the old outline renderer, off by default because it is slow; only use it without Litematica.
 "Auto walk" walks (W + jump, smooth turning) to the nearest spot where the next block can be placed, then places as usual. "Show path" draws the route.
+
+## Changes in 2.7.4
+- **Startup loading screen.** Shown once when the title screen first appears: fades in / out in the menu colours, lists what was loaded (modules, config, custom sounds, schematics, Litematica) with a progress bar. Any key or click skips it. Client > GUI: "Startup splash" (on / off), "Splash length (s)", "Preview splash".
 
 ## Changes in 2.7.3
 - **Fixed the endless chest <-> build walking loop.** A chest trip is only started when a block that still has to be built needs an item you do not carry (or you have no filler at all). Before, "nothing in reach is placeable" was enough, so when the remaining blocks were just unreachable it walked to the chest, came back, found nothing placeable and went to the chest again.
