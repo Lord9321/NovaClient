@@ -5,6 +5,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.*;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.decoration.ArmorStandEntity;
@@ -12,6 +13,7 @@ import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.mob.Monster;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -39,6 +41,100 @@ public final class RenderModules {
     }
 
     private static PlayerEntity mcPlayer() { return net.minecraft.client.MinecraftClient.getInstance().player; }
+
+    private static String one(float v) { return String.valueOf(Math.round(v * 10f) / 10f); }
+
+    /**
+     * Name, health, distance and gear above entities (HUD pass, so it works through walls). Own implementation: a matte dark tag with a
+     * colour bar, items drawn with the game's own item renderer.
+     */
+    public static class NameTags extends Mod {
+        Setting.Num range = num("Range", 96, 8, 256, 8);
+        Setting.Bool players = bool("Players", true), hostiles = bool("Hostiles", false), passives = bool("Passives", false);
+        Setting.Bool health = bool("Health", true), distance = bool("Distance", true);
+        Setting.Bool gear = bool("Armor and held items", true), durability = bool("Durability bars", true);
+        Setting.Mode style = mode("Style", "Matte", "Matte", "Minimal");
+
+        public NameTags() { super("NameTags", Category.RENDER, "Name, health, distance and gear above players, through walls."); }
+
+        @Override public void onHud(DrawContext ctx) {
+            Proj pr = Proj.begin();
+            if (pr == null) return;
+            for (Entity e : mc.world.getEntities()) {
+                if (!(e instanceof LivingEntity le)) continue;
+                int col = colorFor(e, players.get(), hostiles.get(), passives.get(), false);
+                if (col == 0 || mc.player.distanceTo(e) > range.get()) continue;
+                double[] s = pr.project(Proj.lerpPos(e).add(0, e.getHeight() + 0.3, 0));
+                if (s == null) continue;
+
+                String name = e.getName().getString();
+                String hp = health.get() ? one(le.getHealth() + le.getAbsorptionAmount()) : null;
+                String dist = distance.get() ? (int) mc.player.distanceTo(e) + "m" : null;
+                int hpCol = Gfx.mix(0xFFFF3B3B, 0xFF4DFF6A, Math.max(0f, Math.min(1f, le.getHealth() / Math.max(1f, le.getMaxHealth()))));
+                boolean matte = style.is("Matte");
+                int w = (matte ? 10 : 4) + U.width(name) + (hp != null ? 6 + U.width(hp) : 0) + (dist != null ? 6 + U.width(dist) : 0);
+                int x = (int) Math.round(s[0]) - w / 2, y = (int) Math.round(s[1]) - 14;
+                if (matte) {
+                    Gfx.rrect(ctx, x, y, w, 13, 4, 0xCC141414);
+                    Gfx.rrect(ctx, x + 2, y + 3, 2, 7, 1, col);
+                }
+                int tx = x + (matte ? 7 : 2);
+                U.text(ctx, name, tx, y + 3, 0xFFFFFFFF);
+                tx += U.width(name) + 6;
+                if (hp != null) { U.text(ctx, hp, tx, y + 3, hpCol); tx += U.width(hp) + 6; }
+                if (dist != null) U.text(ctx, dist, tx, y + 3, 0xFF9A9A9A);
+
+                if (gear.get()) {
+                    EquipmentSlot[] slots = {EquipmentSlot.MAINHAND, EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET, EquipmentSlot.OFFHAND};
+                    List<ItemStack> shown = new ArrayList<>();
+                    for (EquipmentSlot sl : slots) { ItemStack st = le.getEquippedStack(sl); if (!st.isEmpty()) shown.add(st); }
+                    int gx = (int) Math.round(s[0]) - shown.size() * 17 / 2, gy = y - 19;
+                    for (ItemStack st : shown) {
+                        ctx.drawItem(st, gx, gy);
+                        if (durability.get()) ctx.drawStackOverlay(mc.textRenderer, st, gx, gy);
+                        gx += 17;
+                    }
+                }
+            }
+        }
+    }
+
+    /** Labels and boxes for dropped items, through walls. */
+    public static class DropESP extends Mod {
+        Setting.Num range = num("Range", 64, 8, 256, 8), minStack = num("Min stack", 1, 1, 64, 1);
+        Setting.Mode style = mode("Style", "Label", "Label", "Label + box", "Box");
+        Setting.Bool icon = bool("Item icon", true), distance = bool("Distance", false);
+
+        public DropESP() { super("DropESP", Category.RENDER, "Labels and boxes for dropped items, through walls."); }
+
+        @Override public void onHud(DrawContext ctx) {
+            Proj pr = Proj.begin();
+            if (pr == null) return;
+            boolean label = !style.is("Box"), box = !style.is("Label");
+            for (Entity e : mc.world.getEntities()) {
+                if (!(e instanceof ItemEntity ie) || !ie.isAlive()) continue;
+                ItemStack st = ie.getStack();
+                if (st.getCount() < minStack.getInt() || mc.player.distanceTo(e) > range.get()) continue;
+                float[] r = pr.rect(Proj.lerpBox(e));
+                if (r == null) continue;
+                int x1 = Math.round(r[0]), y1 = Math.round(r[1]), x2 = Math.round(r[2]), y2 = Math.round(r[3]);
+                if (x2 - x1 < 5) { x1 -= 2; x2 += 2; }
+                if (y2 - y1 < 5) { y1 -= 2; y2 += 2; }
+                if (box) ESP.box(ctx, x1, y1, x2, y2, C_ITEM);
+                if (!label) continue;
+                String t = st.getName().getString() + (st.getCount() > 1 ? " x" + st.getCount() : "");
+                String d = distance.get() ? " " + (int) mc.player.distanceTo(e) + "m" : "";
+                boolean ic = icon.get();
+                int w = (ic ? 20 : 6) + U.width(t) + U.width(d), h = ic ? 18 : 13;
+                int x = (x1 + x2) / 2 - w / 2, y = y1 - h - 2;
+                Gfx.rrect(ctx, x, y, w, h, 4, 0xCC141414);
+                int tx = x + 4;
+                if (ic) { ctx.drawItem(st, x + 2, y + 1); tx = x + 20; }
+                U.text(ctx, t, tx, y + (h - 8) / 2, 0xFFFFFFFF);
+                if (!d.isEmpty()) U.text(ctx, d, tx + U.width(t), y + (h - 8) / 2, 0xFF9A9A9A);
+            }
+        }
+    }
 
     public static class ESP extends Mod {
         Setting.Num range = num("Range", 96, 8, 256, 8);

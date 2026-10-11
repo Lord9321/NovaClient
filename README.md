@@ -4,7 +4,7 @@ Fabric, Minecraft 1.21.11. Open the GUI with **Right Shift**.
 
 ## Build
 1. https://fabricmc.net/develop -> 1.21.11, copy exact versions into `gradle.properties`.
-2. JDK 21, `gradle build` (needs Gradle 9.x; or `./gradlew build` if you have the wrapper). After building, check the jar is not empty: `unzip -l build/libs/nova-client-2.7.4.jar` must list `fabric.mod.json` and `nova/*.class`. Jar: `build/libs/nova-client-2.7.4.jar` (not `-sources`). Put it in `mods/` with Fabric API.
+2. JDK 21, `gradle build` (needs Gradle 9.x; or `./gradlew build` if you have the wrapper). After building, check the jar is not empty: `unzip -l build/libs/nova-client-2.7.5.jar` must list `fabric.mod.json` and `nova/*.class`. Jar: `build/libs/nova-client-2.7.5.jar` (not `-sources`). Put it in `mods/` with Fabric API.
 
 ## GUI
 Icon tabs on the left, module cards in two columns. Left click = toggle, right click = fold out settings,
@@ -19,6 +19,12 @@ It turns smoothly to each face (Aim speed / Max turn), only clicks when the cros
 "Load into Litematica" (default on) hands the loaded file + origin + rotation to Litematica as a placement, so Litematica renders it (needs the Litematica mod; it follows origin/rotation/offset changes and is removed on Unload).
 "Built-in preview" is the old outline renderer, off by default because it is slow; only use it without Litematica.
 "Auto walk" walks (W + jump, smooth turning) to the nearest spot where the next block can be placed, then places as usual. "Show path" draws the route.
+
+## Changes in 2.7.5
+- **UI shapes** (Client > Layout > Shape): Rounded (as before), Squircle (fuller superellipse corners) or Angular (cut corners). Applies to the menu, cards, popups, the splash screen and the matte tags.
+- **NameTags** (Render): name, health (+ absorption), distance and armor / held items above players with durability bars, through walls. Style: Matte (dark tag with colour bar) or Minimal. Players / hostiles / passives toggles and range.
+- **DropESP** (Render): labels with item icon, name, stack size and distance above dropped items, optional box. Range, min stack, style (Label / Label + box / Box).
+- Both are written for Nova (HUD pass, same projection as ESP), not copied from another client.
 
 ## Changes in 2.7.4
 - **Startup loading screen.** Shown once when the title screen first appears: fades in / out in the menu colours, lists what was loaded (modules, config, custom sounds, schematics, Litematica) with a progress bar. Any key or click skips it. Client > GUI: "Startup splash" (on / off), "Splash length (s)", "Preview splash".

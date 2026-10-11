@@ -2,6 +2,7 @@ package nova.core;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import nova.modules.ClientModules;
 
 /** 2D drawing helpers: rounded rectangles, lines, colour maths. */
 public final class Gfx {
@@ -25,6 +26,21 @@ public final class Gfx {
         return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
+    /**
+     * How far the corner reaches in along a row that is `dy` away from the corner's centre line (0..r).
+     * Shape comes from Client > Layout > Shape: Rounded (circle), Squircle (superellipse, fuller corners), Angular (cut corners).
+     */
+    private static double spanDy(double dy, int r) {
+        switch (ClientModules.Layout.shapeIndex()) {
+            case 1: {
+                double q = Math.min(1.0, dy / r), q2 = q * q;
+                return r * Math.pow(Math.max(0.0, 1.0 - q2 * q2), 0.25);
+            }
+            case 2: return Math.max(0.0, r - dy);
+            default: return Math.sqrt(Math.max(0, (double) r * r - dy * dy));
+        }
+    }
+
     public static float ease(float t) { t = Math.max(0f, Math.min(1f, t)); return t * t * (3 - 2 * t); }
 
     public static void rrect(DrawContext c, int x, int y, int w, int h, int r, int color) {
@@ -34,7 +50,7 @@ public final class Gfx {
         c.fill(x, y + r, x + w, y + h - r, color);
         for (int i = 0; i < r; i++) {
             double dy = r - i - 0.5;
-            double span = Math.sqrt(Math.max(0, (double) r * r - dy * dy));
+            double span = spanDy(dy, r);
             int inset = (int) Math.floor(r - span);
             c.fill(x + inset, y + i, x + w - inset, y + i + 1, color);
             c.fill(x + inset, y + h - 1 - i, x + w - inset, y + h - i, color);
@@ -55,8 +71,8 @@ public final class Gfx {
         r = Math.min(r, Math.min(w, h) / 2);
         for (int i = 0; i < h; i++) {
             int inset = 0;
-            if (i < r) { double dy = r - i - 0.5; inset = (int) Math.floor(r - Math.sqrt(Math.max(0, (double) r * r - dy * dy))); }
-            else if (i >= h - r) { double dy = i - (h - r) + 0.5; inset = (int) Math.floor(r - Math.sqrt(Math.max(0, (double) r * r - dy * dy))); }
+            if (i < r) { double dy = r - i - 0.5; inset = (int) Math.floor(r - spanDy(dy, r)); }
+            else if (i >= h - r) { double dy = i - (h - r) + 0.5; inset = (int) Math.floor(r - spanDy(dy, r)); }
             c.fill(x + inset, y + i, x + w - inset, y + i + 1, mix(top, bottom, i / (float) Math.max(1, h - 1)));
         }
     }
@@ -79,7 +95,7 @@ public final class Gfx {
         c.fill(x, y + r, x + w, y + h - r, color);
         for (int i = 0; i < r; i++) {
             double dy = r - i - 0.5;
-            int inset = (int) Math.round(r - Math.sqrt(Math.max(0, (double) r * r - dy * dy)));
+            int inset = (int) Math.round(r - spanDy(dy, r));
             c.fill(x + inset, y + i, x + w - inset, y + i + 1, color);
             c.fill(x + inset, y + h - 1 - i, x + w - inset, y + h - i, color);
         }

@@ -35,7 +35,8 @@ public final class ModuleManager {
             new PlayerModules.AutoTool(), new PlayerModules.ChestStealer(), new PlayerModules.AutoReplenish());
         add(new RenderModules.ESP(), new RenderModules.Tracers(), new RenderModules.StorageESP(),
             new RenderModules.OreESP(), new RenderModules.HoleESP(), new RenderModules.GlowESP(),
-            new RenderModules.Fullbright(), new RenderModules.NoBob(), new RenderModules.FovChanger());
+            new RenderModules.Fullbright(), new RenderModules.NoBob(), new RenderModules.FovChanger(),
+            new RenderModules.NameTags(), new RenderModules.DropESP());
         add(new BuildModules.Schematic(), new WorldModules.Nuker(), new WorldModules.OreScan(),
             new WorldModules.StashFinder(), new WorldModules.BaseFinder(), new WorldModules.SpawnerFinder());
         add(new MiscModules.AutoRespawn(), new MiscModules.AutoLog(), new MiscModules.AntiAFK(), new MiscModules.PearlThrow());

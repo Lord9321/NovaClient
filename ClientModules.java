@@ -98,6 +98,7 @@ public final class ClientModules {
         Setting.Mode columns = mode("Columns", "Auto", "Auto", "1", "2", "3");
         Setting.Num radius = num("Corner radius", 9, 0, 14, 1), glow = num("Glow (%)", 100, 0, 200, 10), opacity = num("Window opacity (%)", 92, 40, 100, 1);
         Setting.Bool sheen = bool("Gradient and header line", true);
+        Setting.Mode shape = mode("Shape", "Rounded", "Rounded", "Squircle", "Angular");
 
         public Layout() { super("Layout", Category.CLIENT, "Size, corners, glow and opacity of this menu."); INSTANCE = this; }
 
@@ -107,6 +108,8 @@ public final class ClientModules {
         public static float glow() { return INSTANCE == null ? 1f : (float) INSTANCE.glow.get() / 100f; }
         public static int opacity() { return INSTANCE == null ? 92 : INSTANCE.opacity.getInt(); }
         public static boolean sheen() { return INSTANCE == null || INSTANCE.sheen.get(); }
+        /** 0 = Rounded, 1 = Squircle, 2 = Angular (cut corners). Used by Gfx for every panel, card, popup and the splash. */
+        public static int shapeIndex() { return INSTANCE == null ? 0 : (INSTANCE.shape.is("Squircle") ? 1 : INSTANCE.shape.is("Angular") ? 2 : 0); }
 
         /** Number of card columns for a content width. */
         public static int cols(int cw) {
