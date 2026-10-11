@@ -143,6 +143,9 @@ public final class BuildModules {
         final Map<Integer, Integer> strikes = new HashMap<>();
         final Map<Integer, int[]> clicks = new HashMap<>();
         int lastDoneSeen = -1, lastBuiltTick, noPlaceTicks;
+        // restock loop breaker: pause chest trips when trips follow each other without a single block being built in between
+        int restockPauseUntil, lastTripDone = -1, fruitlessTrips, shortTick = -9999;
+        boolean shortCache;
 
         // filler blocks (bridges, stairs, support columns) that we placed ourselves
         final Set<BlockPos> fillers = new HashSet<>();
@@ -224,7 +227,7 @@ public final class BuildModules {
             } else U.chat("Look at a block first.");
         }
 
-        private void resetProgress() { done.clear(); firstPending = 0; doneCount = 0; curIdx = -1; tick = 0; recPos = -1; ghosts = List.of(); badTargets.clear(); strikes.clear(); clicks.clear(); lastDoneSeen = -1; noPlaceTicks = 0; junk.clear(); ours.clear(); gaveUp.clear(); fixTries.clear(); wrongCount = 0; layerMin = 0; layerCacheTick = -1; removeCacheTick = -1; lastAct = lastBuiltTick = walkClock; stuckCount = 0; resetWalk(); }
+        private void resetProgress() { done.clear(); firstPending = 0; doneCount = 0; curIdx = -1; tick = 0; recPos = -1; ghosts = List.of(); badTargets.clear(); strikes.clear(); clicks.clear(); lastDoneSeen = -1; noPlaceTicks = 0; restockPauseUntil = 0; lastTripDone = -1; fruitlessTrips = 0; shortTick = -9999; junk.clear(); ours.clear(); gaveUp.clear(); fixTries.clear(); wrongCount = 0; layerMin = 0; layerCacheTick = -1; removeCacheTick = -1; lastAct = lastBuiltTick = walkClock; stuckCount = 0; resetWalk(); }
 
         void rebuildView() {
             if (schem == null) return;
@@ -975,6 +978,36 @@ public final class BuildModules {
         /** Forget short parks (restock / unstick retry them) but keep the ones that already failed 3+ times. */
         private void forgetParked() { badTargets.keySet().removeIf(k -> strikes.getOrDefault(k, 0) < 3); }
 
+        /**
+         * Is restocking actually the fix? True only when a block that is still to be built needs an item you do not carry
+         * (or you are completely out of filler). Before, an empty candidate list was enough to start a chest trip, so when the remaining
+         * blocks were merely out of reach it walked to the chest, came back, found nothing placeable and went to the chest again.
+         */
+        private boolean materialShort() {
+            if (walkClock - shortTick < 20) return shortCache;
+            shortTick = walkClock;
+            boolean res = false;
+            if (filler.get() && stockFiller.get() && countOf(fillerPreferred()) == 0) res = true;
+            final int ly = layerOn() ? layerY() : Integer.MIN_VALUE;
+            while (firstPending < view.size() && done.get(firstPending)) firstPending++;
+            int scanned = 0;
+            for (int i = firstPending; i < view.size() && !res; i++) {
+                if (done.get(i) || bad(i)) continue;
+                Litematic.Entry e = view.get(i);
+                if (ly != Integer.MIN_VALUE) { if (e.y() < ly) continue; if (e.y() > ly) break; }
+                if (++scanned > 30000) break;
+                BlockState want = e.state();
+                if (skipState(want)) continue;
+                BlockState cur = mc.world.getBlockState(world(e));
+                if (!wantsDouble(want, cur) && !cur.isReplaceable()) continue;   // a wrong block is not a material problem
+                Item item = want.getBlock().asItem();
+                if (item == Items.AIR) continue;
+                if (!canGet(item)) res = true;
+            }
+            shortCache = res;
+            return res;
+        }
+
         /** True when the same key was clicked more than 5 times with less than 5 s between clicks: the server keeps refusing it (ghost block). */
         private boolean tooManyClicks(int key) {
             if (clicks.size() > 2048) clicks.values().removeIf(c -> walkClock - c[1] > 100);
@@ -1370,6 +1403,8 @@ public final class BuildModules {
         private boolean chestWalk(BlockPos feet) {
             if (!restock.get() || missing.isEmpty() || mc.player.isCreative() || mc.currentScreen != null || allDone()) return false;
             if (restockBlockedUntil > walkClock) { walkStatus = "Inventory full - make room"; return false; }
+            if (restockPauseUntil > walkClock) { walkStatus = "Restock paused: nothing was built after the last chest trips"; return false; }
+            if (!materialShort()) return false;   // what is left is out of reach / refused, more items would not help
             List<BlockPos> chests = nearbyChests();
             if (chests.isEmpty()) {
                 walkStatus = restockFrom.is("Marked only")
@@ -1589,6 +1624,12 @@ public final class BuildModules {
             if (visitTook == 0 && visitFull) { restockBlockedUntil = walkClock + 400; U.chat("Restock: inventory is full, make some room."); }
             mc.player.closeHandledScreen();
             chestPos = null; rcd = 6; tick = 0;
+            if (doneCount <= lastTripDone) fruitlessTrips++; else fruitlessTrips = 0;
+            lastTripDone = doneCount;
+            if (fruitlessTrips >= 2) {
+                fruitlessTrips = 0; restockPauseUntil = walkClock + 1200;
+                U.chat("Restock: two chest trips in a row without a block being built in between - pausing restock for 60 s. The remaining blocks are probably out of reach or refused by the server.");
+            }
             forgetParked(); walkCd = 0; failCount = 0; noPlaceTicks = 0; curIdx = -1;   // blocks parked while we had no material can be tried again
             if (layerOn()) layerCacheTick = -1;
             return true;
@@ -1596,6 +1637,7 @@ public final class BuildModules {
 
         private void openChest() {
             if (!restock.get() || missing.isEmpty() || mc.currentScreen != null || mc.player.isCreative() || allDone() || restockBlockedUntil > walkClock) return;
+            if (restockPauseUntil > walkClock || !materialShort()) return;
             if (rcd > 0) { rcd--; return; }
             var p = mc.player;
             Vec3d eye = p.getEyePos();
