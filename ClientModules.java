@@ -1,20 +1,35 @@
 package nova.modules;
 
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.sound.PositionedSoundInstance;
+import net.minecraft.registry.Registries;
+import net.minecraft.sound.SoundEvent;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.util.Identifier;
 import nova.core.*;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReadParam;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
+import javax.sound.sampled.AudioFormat;
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Clip;
+import javax.sound.sampled.FloatControl;
+import javax.sound.sampled.LineEvent;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 public final class ClientModules {
@@ -256,14 +271,135 @@ public final class ClientModules {
         }
     }
 
-    /** Sounds and animation of the click GUI. */
+    /**
+     * Sounds of the click GUI. Pick one of the built-in sounds, or put your own .wav / .aiff / .au files in
+     * config/nova/sounds, press "Refresh sound list" and pick "File: yourname.wav".
+     */
     public static class Gui extends Mod {
         static Gui INSTANCE;
-        Setting.Bool sounds = bool("Click sounds", true);
+        /** {name in the list, vanilla sound id}. An id that does not exist in this version just falls back to the normal click. */
+        static final String[][] PRESETS = {
+            {"Click", "ui.button.click"}, {"Pling", "block.note_block.pling"}, {"Bell", "block.note_block.bell"},
+            {"Chime", "block.note_block.chime"}, {"Harp", "block.note_block.harp"}, {"Bit", "block.note_block.bit"},
+            {"Hat", "block.note_block.hat"}, {"Snare", "block.note_block.snare"}, {"Bass drum", "block.note_block.basedrum"},
+            {"Xylophone", "block.note_block.xylophone"}, {"Iron xylophone", "block.note_block.iron_xylophone"},
+            {"Cow bell", "block.note_block.cow_bell"}, {"Banjo", "block.note_block.banjo"}, {"Guitar", "block.note_block.guitar"},
+            {"Flute", "block.note_block.flute"}, {"Amethyst", "block.amethyst_block.chime"}, {"XP orb", "entity.experience_orb.pickup"},
+            {"Pop", "entity.item.pickup"}, {"Lever", "block.lever.click"}, {"Wood button", "block.wooden_button.click_on"},
+            {"Stone button", "block.stone_button.click_on"}, {"Tripwire", "block.tripwire.click_on"}, {"Comparator", "block.comparator.click"}
+        };
+        static final String FILE = "File: ";
 
-        public Gui() { super("GUI", Category.CLIENT, "Sounds of this menu."); INSTANCE = this; }
+        private static String[] presetNames() {
+            String[] n = new String[PRESETS.length];
+            for (int i = 0; i < n.length; i++) n[i] = PRESETS[i][0];
+            return n;
+        }
+
+        Setting.Bool sounds = bool("Click sounds", true);
+        Setting.Mode sound = mode("Sound", "Click", presetNames());
+        Setting.Action refreshSounds = action("Refresh sound list", Gui::refreshAction);
+        Setting.Action preview = action("Play sound", () -> play(1.0f));
+        Setting.Num fileVolume = num("Custom file volume (%)", 80, 5, 100, 5);
+        Setting.Bool fileVary = bool("Custom file: pitch follows action", true);
+
+        private static final class Pcm { byte[] data; AudioFormat fmt; long modified; }
+        private static final Map<String, Pcm> PCM = new HashMap<>();
+        private static String lastFileErr = "";
+
+        public Gui() { super("GUI", Category.CLIENT, "Sounds of this menu (own sounds: config/nova/sounds)."); INSTANCE = this; scan(); }
 
         public static boolean sounds() { return INSTANCE == null || INSTANCE.sounds.get(); }
+
+        private static Path dir() { return FabricLoader.getInstance().getConfigDir().resolve("nova").resolve("sounds"); }
+
+        /** Reads the sounds folder into the "Sound" list (also runs every time the menu opens). */
+        public static void scan() {
+            if (INSTANCE == null) return;
+            List<String> files = new ArrayList<>();
+            try { Files.createDirectories(dir()); } catch (Exception ignored) {}
+            try (Stream<Path> st = Files.list(dir())) {
+                st.forEach(f -> {
+                    String n = f.getFileName().toString(), l = n.toLowerCase();
+                    if (l.endsWith(".wav") || l.endsWith(".aif") || l.endsWith(".aiff") || l.endsWith(".au")) files.add(FILE + n);
+                });
+            } catch (Exception ignored) {}
+            Collections.sort(files);
+            List<String> all = new ArrayList<>(Arrays.asList(presetNames()));
+            all.addAll(files);
+            INSTANCE.sound.setModes(all.toArray(new String[0]));
+        }
+
+        private static void refreshAction() {
+            scan();
+            U.chat("Put .wav / .aiff / .au files in " + dir() + " - " + (INSTANCE.sound.modes.length - PRESETS.length) + " found. (.mp3 / .ogg are not supported, convert them to .wav.)");
+        }
+
+        /** Plays the selected GUI sound. Pitch is the one the GUI asks for (higher for "on", lower for "off", ...). */
+        public static void play(float pitch) {
+            String sel = INSTANCE == null ? "Click" : INSTANCE.sound.value;
+            if (sel.startsWith(FILE)) {
+                if (playFile(sel.substring(FILE.length()), pitch)) return;
+                sel = "Click";   // file missing / unreadable: normal click instead
+            }
+            String id = "ui.button.click";
+            for (String[] p : PRESETS) if (p[0].equals(sel)) id = p[1];
+            SoundEvent ev = Registries.SOUND_EVENT.get(Identifier.of("minecraft", id));
+            var sm = MinecraftClient.getInstance().getSoundManager();
+            if (ev == null) sm.play(PositionedSoundInstance.master(SoundEvents.UI_BUTTON_CLICK, pitch));
+            else sm.play(PositionedSoundInstance.master(ev, pitch));
+        }
+
+        private static Pcm load(String name) throws Exception {
+            Path f = dir().resolve(name).normalize();
+            if (!f.startsWith(dir().normalize()) || !Files.isRegularFile(f)) throw new java.io.FileNotFoundException(name);
+            if (Files.size(f) > 20L * 1024 * 1024) throw new java.io.IOException("file is bigger than 20 MB");
+            long mod = Files.getLastModifiedTime(f).toMillis();
+            Pcm c = PCM.get(name);
+            if (c != null && c.modified == mod) return c;
+            try (AudioInputStream in = AudioSystem.getAudioInputStream(f.toFile())) {
+                AudioFormat src = in.getFormat();
+                int ch = Math.max(1, src.getChannels());
+                AudioFormat pcm = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, src.getSampleRate(), 16, ch, ch * 2, src.getSampleRate(), false);
+                try (AudioInputStream conv = AudioSystem.getAudioInputStream(pcm, in)) {
+                    Pcm p = new Pcm();
+                    p.data = conv.readAllBytes(); p.fmt = pcm; p.modified = mod;
+                    PCM.put(name, p);
+                    return p;
+                }
+            }
+        }
+
+        private static boolean playFile(String name, float pitch) {
+            try {
+                final Pcm p = load(name);
+                final double vol = INSTANCE == null ? 0.8 : INSTANCE.fileVolume.get() / 100.0;
+                final float pr = INSTANCE != null && !INSTANCE.fileVary.get() ? 1f : Math.max(0.5f, Math.min(2f, pitch));
+                Thread t = new Thread(() -> {   // opening a line can block for a moment: keep it off the render thread
+                    try {
+                        float rate = p.fmt.getSampleRate() * pr;
+                        AudioFormat f = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, rate, 16, p.fmt.getChannels(), p.fmt.getFrameSize(), rate, false);
+                        Clip clip = AudioSystem.getClip();
+                        clip.open(f, p.data, 0, p.data.length);
+                        if (clip.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
+                            FloatControl g = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
+                            float db = (float) (20.0 * Math.log10(Math.max(0.0001, vol)));
+                            g.setValue(Math.max(g.getMinimum(), Math.min(g.getMaximum(), db)));
+                        }
+                        clip.addLineListener(e -> { if (e.getType() == LineEvent.Type.STOP) clip.close(); });
+                        clip.start();
+                    } catch (Throwable ex) { ex.printStackTrace(); }
+                }, "nova-sound");
+                t.setDaemon(true);
+                t.start();
+                lastFileErr = "";
+                return true;
+            } catch (Throwable e) {
+                String m = name + ": " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+                if (!m.equals(lastFileErr)) { lastFileErr = m; U.chat("Could not play sound file (" + m + "). Use 16 / 24 bit PCM .wav files."); }
+                return false;
+            }
+        }
     }
 
     /** Small popups in the bottom right when a module is switched on or off. */

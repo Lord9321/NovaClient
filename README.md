@@ -4,7 +4,7 @@ Fabric, Minecraft 1.21.11. Open the GUI with **Right Shift**.
 
 ## Build
 1. https://fabricmc.net/develop -> 1.21.11, copy exact versions into `gradle.properties`.
-2. JDK 21, `gradle build` (needs Gradle 9.x; or `./gradlew build` if you have the wrapper). After building, check the jar is not empty: `unzip -l build/libs/nova-client-2.7.1.jar` must list `fabric.mod.json` and `nova/*.class`. Jar: `build/libs/nova-client-2.7.1.jar` (not `-sources`). Put it in `mods/` with Fabric API.
+2. JDK 21, `gradle build` (needs Gradle 9.x; or `./gradlew build` if you have the wrapper). After building, check the jar is not empty: `unzip -l build/libs/nova-client-2.7.2.jar` must list `fabric.mod.json` and `nova/*.class`. Jar: `build/libs/nova-client-2.7.2.jar` (not `-sources`). Put it in `mods/` with Fabric API.
 
 ## GUI
 Icon tabs on the left, module cards in two columns. Left click = toggle, right click = fold out settings,
@@ -19,6 +19,17 @@ It turns smoothly to each face (Aim speed / Max turn), only clicks when the cros
 "Load into Litematica" (default on) hands the loaded file + origin + rotation to Litematica as a placement, so Litematica renders it (needs the Litematica mod; it follows origin/rotation/offset changes and is removed on Unload).
 "Built-in preview" is the old outline renderer, off by default because it is slow; only use it without Litematica.
 "Auto walk" walks (W + jump, smooth turning) to the nearest spot where the next block can be placed, then places as usual. "Show path" draws the route.
+
+## Changes in 2.7.2
+- **Builder no longer gets stuck on blocks it cannot place or reach.**
+  - Blocks the server keeps refusing (clicked 6 times in a row but never staying) are parked instead of being clicked forever.
+  - The "can't place" counter is global now; before it restarted whenever the builder switched to another block, so two failing blocks could take turns forever.
+  - Parking gets longer every time a block fails (10 s, 20 s, 40 s ... up to ~5 min). Auto unstick and restocking only forget short parks; blocks that failed 3+ times stay parked.
+  - New progress watchdog: if no block was finished for 2x "Unstick after (s)" (restock trips excluded) the current target is skipped. Walking back and forth no longer counts as progress.
+  - The status line shows "N blocks skipped (cannot reach / place), retrying later".
+- **GUI sounds** (Client > GUI): "Sound" list with 23 built-in sounds (note block instruments, bells, buttons, ...), "Play sound" to preview.
+  Your own sounds: put `.wav` / `.aiff` / `.au` files in `config/nova/sounds`, press "Refresh sound list" (or just reopen the menu) and pick `File: yourname.wav`.
+  "Custom file volume (%)" and "Custom file: pitch follows action" apply to your files. `.mp3` / `.ogg` are not supported, convert them to `.wav`.
 
 ## Changes in 2.7.1
 - **Fixed the restock crash** (`NullPointerException ... Map.get` in handleContainer): after taking a stack out of a chest the game empties the slot on the client, so the item was read as air. It is now read before the click.

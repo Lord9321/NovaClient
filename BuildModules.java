@@ -138,6 +138,11 @@ public final class BuildModules {
         boolean keysHeld;
         String walkStatus = "";
         final Map<Integer, Integer> badTargets = new HashMap<>();
+        // give-up memory that survives "Auto unstick": strikes = how often a target was parked (parking time doubles each time),
+        // clicks = {clicks, last tick} per target, to notice blocks the server keeps refusing
+        final Map<Integer, Integer> strikes = new HashMap<>();
+        final Map<Integer, int[]> clicks = new HashMap<>();
+        int lastDoneSeen = -1, lastBuiltTick, noPlaceTicks;
 
         // filler blocks (bridges, stairs, support columns) that we placed ourselves
         final Set<BlockPos> fillers = new HashSet<>();
@@ -201,7 +206,7 @@ public final class BuildModules {
             }
         }
 
-        void unload() { schem = null; view.clear(); done.clear(); nextPos = null; curIdx = -1; ghosts = List.of(); keys = new long[0]; surf.clear(); resetWalk(); removeLite(); fillers.clear(); fillTarget = null; junk.clear(); ours.clear(); gaveUp.clear(); fixTries.clear(); wrongCount = 0; layerMin = 0; layerCacheTick = -1; removeCacheTick = -1; status = "Unloaded."; }
+        void unload() { schem = null; view.clear(); done.clear(); nextPos = null; curIdx = -1; ghosts = List.of(); keys = new long[0]; surf.clear(); resetWalk(); removeLite(); fillers.clear(); fillTarget = null; junk.clear(); ours.clear(); gaveUp.clear(); fixTries.clear(); strikes.clear(); clicks.clear(); wrongCount = 0; layerMin = 0; layerCacheTick = -1; removeCacheTick = -1; status = "Unloaded."; }
 
         void originHere() {
             if (mc.player == null) return;
@@ -219,7 +224,7 @@ public final class BuildModules {
             } else U.chat("Look at a block first.");
         }
 
-        private void resetProgress() { done.clear(); firstPending = 0; doneCount = 0; curIdx = -1; tick = 0; recPos = -1; ghosts = List.of(); badTargets.clear(); junk.clear(); ours.clear(); gaveUp.clear(); fixTries.clear(); wrongCount = 0; layerMin = 0; layerCacheTick = -1; removeCacheTick = -1; lastAct = walkClock; stuckCount = 0; resetWalk(); }
+        private void resetProgress() { done.clear(); firstPending = 0; doneCount = 0; curIdx = -1; tick = 0; recPos = -1; ghosts = List.of(); badTargets.clear(); strikes.clear(); clicks.clear(); lastDoneSeen = -1; noPlaceTicks = 0; junk.clear(); ours.clear(); gaveUp.clear(); fixTries.clear(); wrongCount = 0; layerMin = 0; layerCacheTick = -1; removeCacheTick = -1; lastAct = lastBuiltTick = walkClock; stuckCount = 0; resetWalk(); }
 
         void rebuildView() {
             if (schem == null) return;
@@ -281,7 +286,7 @@ public final class BuildModules {
 
         private BlockPos world(Litematic.Entry e) { return base().add(e.x(), e.y(), e.z()); }
 
-        @Override public void onEnable() { lastAct = walkClock; refresh(); if (schem == null && !file.is("None")) loadSelected(); }
+        @Override public void onEnable() { lastAct = lastBuiltTick = walkClock; lastDoneSeen = -1; refresh(); if (schem == null && !file.is("None")) loadSelected(); }
         @Override public void onDisable() { nextPos = null; curIdx = -1; ghosts = List.of(); resetWalk(); }
 
         private int findSlot(Item it) {
@@ -649,8 +654,8 @@ public final class BuildModules {
                 BlockPos q = new BlockPos(wp.getX(), y, wp.getZ());
                 if (!mc.world.getBlockState(q).isReplaceable()) { cell = q.up(); break; }
             }
-            if (cell == null) { walkStatus = "No ground under the schematic"; badTargets.put(best, walkClock + 400); return null; }
-            if (schemCell(cell) || isLava(cell)) { badTargets.put(best, walkClock + 400); return null; }
+            if (cell == null) { walkStatus = "No ground under the schematic"; park(best, 400); return null; }
+            if (schemCell(cell) || isLava(cell)) { park(best, 400); return null; }
             return cell.toImmutable();
         }
 
@@ -681,8 +686,11 @@ public final class BuildModules {
             if (pl == null) return false;
             nextPos = ft;
             walkStatus = "Placing filler";
-            if (placeOne(pl)) { fillers.add(ft.toImmutable()); fillFail = 0; cd = delay.getInt(); }
-            else if (++fillFail > 60) { fillFail = 0; fillTarget = null; if (fillFor >= 0) badTargets.put(fillFor, walkClock + 300); }
+            if (placeOne(pl)) {
+                fillers.add(ft.toImmutable()); fillFail = 0; cd = delay.getInt();
+                if (tooManyClicks(~ft.hashCode())) { fillTarget = null; park(fillFor, 300); }   // the server keeps removing the filler block
+            }
+            else if (++fillFail > 60) { fillFail = 0; fillTarget = null; park(fillFor, 300); }
             return true;
         }
 
@@ -955,6 +963,26 @@ public final class BuildModules {
 
         // ------------------------------------------------------------------ ghost preview
         private boolean bad(int i) { Integer u = badTargets.get(i); return u != null && u > walkClock; }
+
+        /** Park a target. Every repeat doubles the time (base, 2x, 4x ... 32x) so blocks that really cannot be reached stop coming back first. */
+        private void park(int idx, int baseTicks) {
+            if (idx < 0) return;
+            int s = strikes.merge(idx, 1, Integer::sum);
+            badTargets.put(idx, walkClock + baseTicks * (1 << Math.min(s - 1, 5)));
+            clicks.remove(idx);
+        }
+
+        /** Forget short parks (restock / unstick retry them) but keep the ones that already failed 3+ times. */
+        private void forgetParked() { badTargets.keySet().removeIf(k -> strikes.getOrDefault(k, 0) < 3); }
+
+        /** True when the same key was clicked more than 5 times with less than 5 s between clicks: the server keeps refusing it (ghost block). */
+        private boolean tooManyClicks(int key) {
+            if (clicks.size() > 2048) clicks.values().removeIf(c -> walkClock - c[1] > 100);
+            int[] ck = clicks.computeIfAbsent(key, k -> new int[2]);
+            if (walkClock - ck[1] > 100) ck[0] = 0;
+            ck[0]++; ck[1] = walkClock;
+            return ck[0] > 5;
+        }
 
         private int lowerBound(int y) {
             int lo = 0, hi = view.size();
@@ -1391,7 +1419,7 @@ public final class BuildModules {
 
         private void dropPath(int badFor) {
             if (badFor > 0) {
-                if (walkIdx >= 0) badTargets.put(walkIdx, walkClock + badFor);
+                if (walkIdx >= 0) park(walkIdx, badFor);
                 if (walkChest != null) drain(walkChest);   // could not get there: skip it for a minute
             }
             stopKeys(); path = List.of(); pathIdx = 0; walkIdx = -1; walkChest = null; stuck = 0; pathTicks = 0; lastPos = null;
@@ -1440,6 +1468,8 @@ public final class BuildModules {
                     if (fillWalk(feet)) { walkStatus = "Walking to filler spot"; return true; }
                     if (chestWalk(feet)) { walkStatus = "Walking to chest"; return true; }
                     if (cleanWalk(feet)) return true;
+                    int skipped = (int) badTargets.values().stream().filter(u -> u > walkClock).count();
+                    if (skipped > 0 && walkStatus.isEmpty()) walkStatus = skipped + " blocks skipped (cannot reach / place), retrying later";
                     if (walkCd == 0) walkCd = 4;
                     return false;
                 }
@@ -1454,12 +1484,12 @@ public final class BuildModules {
                     return false;
                 }, 12000);
                 if (np == null) {   // none of the nearest blocks can be reached: park them and look at others next time
-                    for (int t : cand) badTargets.put(t, walkClock + 200);
+                    for (int t : cand) park(t, 200);
                     walkStatus = "No route to next block"; walkCd = 20; walkIdx = -1;
                     return false;
                 }
                 if (np.isEmpty()) {   // in reach already, yet pick() found nothing from the exact spot: park it briefly
-                    if (found[0] >= 0) badTargets.put(found[0], walkClock + 80);
+                    if (found[0] >= 0) park(found[0], 80);
                     walkIdx = -1;
                     return false;
                 }
@@ -1530,7 +1560,7 @@ public final class BuildModules {
         // ------------------------------------------------------------------ restock from chests
         private boolean handleContainer() {
             if (chestPos == null || !(mc.player.currentScreenHandler instanceof GenericContainerScreenHandler h) || mc.currentScreen == null) return false;
-            lastAct = walkClock;
+            lastAct = lastBuiltTick = walkClock;
             if (rcd > 0) { rcd--; return true; }
             int n = h.getRows() * 9;
             for (int i = 0; i < n; i++) {
@@ -1559,7 +1589,7 @@ public final class BuildModules {
             if (visitTook == 0 && visitFull) { restockBlockedUntil = walkClock + 400; U.chat("Restock: inventory is full, make some room."); }
             mc.player.closeHandledScreen();
             chestPos = null; rcd = 6; tick = 0;
-            badTargets.clear(); walkCd = 0; failCount = 0; curIdx = -1;   // blocks parked while we had no material can be tried again
+            forgetParked(); walkCd = 0; failCount = 0; noPlaceTicks = 0; curIdx = -1;   // blocks parked while we had no material can be tried again
             if (layerOn()) layerCacheTick = -1;
             return true;
         }
@@ -1625,7 +1655,7 @@ public final class BuildModules {
         private void unstuckNow() {
             stuckCount++;
             String why = walkStatus.isEmpty() ? "nothing can be placed from here" : walkStatus;
-            badTargets.clear(); drained.clear(); chestCacheTick = -9999; restockBlockedUntil = 0;
+            forgetParked(); drained.clear(); chestCacheTick = -9999; restockBlockedUntil = 0;
             failCount = 0; failIdx = -1; fillTarget = null; walkCd = 0; curIdx = -1; rcd = 0; openTries = 0; chestPos = null; recPos = -1;
             dropPath(0);
             if (layerOn()) {
@@ -1668,6 +1698,17 @@ public final class BuildModules {
             if (mc.currentScreen != null) return;
             if (!path.isEmpty()) lastAct = walkClock;
             if (unstick.get() && walkClock - lastAct > stuckSecs.getInt() * 20 && !allDone()) { lastAct = walkClock; unstuckNow(); }
+            // second watchdog: walking around or clicking counts as "activity" above, so a build that only paces back and forth never trips it.
+            // This one only looks at finished blocks (restock trips are excluded).
+            if (doneCount != lastDoneSeen || walkChest != null || chestPos != null) { lastDoneSeen = doneCount; lastBuiltTick = walkClock; }
+            else if (unstick.get() && walkClock - lastBuiltTick > stuckSecs.getInt() * 40 && !allDone()) {
+                lastBuiltTick = walkClock;
+                if (walkIdx >= 0) park(walkIdx, 400);
+                if (curIdx >= 0) park(curIdx, 400);
+                dropPath(0); curIdx = -1; noPlaceTicks = 0;
+                stuckCount++;
+                if (stuckCount <= 3) U.chat("Schematic: no block finished for a long time, skipping the current target.");
+            }
             if (cd > 0) {   // placing is throttled, walking is not
                 cd--;
                 if (!path.isEmpty() && pathIdx < path.size()) walkStep();
@@ -1688,6 +1729,7 @@ public final class BuildModules {
                     else stopKeys();
                     if (walking && bridgeBusy) { nextPos = null; break; }   // busy putting a filler block down
                     if (plan == null) {
+                        noPlaceTicks = 0;
                         nextPos = walking && walkIdx >= 0 && walkIdx < view.size() ? world(view.get(walkIdx)) : null;
                         if (!walking && !fillerPlace() && !fillerCleanup()) openChest();
                         break;
@@ -1697,13 +1739,13 @@ public final class BuildModules {
                 if (plan == null) break;
                 nextPos = plan.pos();
                 if (!placeOne(plan)) {
-                    // a block we can never seem to click gets parked for a while instead of blocking everything
-                    if (failIdx == plan.idx()) {
-                        if (++failCount > 40) { badTargets.put(plan.idx(), walkClock + 200); curIdx = -1; failCount = 0; }
-                    } else { failIdx = plan.idx(); failCount = 1; }
+                    // a block we can never seem to click gets parked (longer every time) instead of blocking everything.
+                    // The counter is not per block: it used to restart whenever pick() switched to another block, so two failing blocks could take turns forever.
+                    if (++noPlaceTicks > 40) { park(plan.idx(), 200); curIdx = -1; noPlaceTicks = 0; }
                     break;
                 }
-                failCount = 0;
+                failCount = 0; noPlaceTicks = 0;
+                if (tooManyClicks(plan.idx())) { park(plan.idx(), 200); curIdx = -1; }   // clicked again and again but the block never stays: server refuses it
                 placed.add(plan.pos());
                 cd = delay.getInt() + (humanize.get() && delay.getInt() > 0 ? (int) Math.round(U.rand(0, 1.5)) : 0);
             }

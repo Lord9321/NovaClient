@@ -57,6 +57,7 @@ public class NovaScreen extends Screen {
 
     @Override protected void init() {
         ClientModules.Background.scan();
+        ClientModules.Gui.scan();
         pw = Math.min(width - 30, ClientModules.Layout.width());
         ph = Math.min(height - 30, ClientModules.Layout.height());
         px = (width - pw) / 2;
@@ -86,7 +87,7 @@ public class NovaScreen extends Screen {
 
     private void click(float pitch) {
         if (!ClientModules.Gui.sounds()) return;
-        client.getSoundManager().play(PositionedSoundInstance.master(SoundEvents.UI_BUTTON_CLICK, pitch));
+        ClientModules.Gui.play(pitch);
     }
 
     private ItemStack icon(Category c) {
