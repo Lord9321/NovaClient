@@ -908,9 +908,24 @@ public final class BuildModules {
                 Path path = find(file.value);
                 if (path == null) throw new IllegalStateException("file not found");
                 Class<?> sc = Class.forName("fi.dy.masa.litematica.schematic.LitematicaSchematic");
-                Object schematic = sc.getMethod("createFromFile", java.io.File.class, String.class)
-                        .invoke(null, path.getParent().toFile(), path.getFileName().toString());
-                if (schematic == null) throw new IllegalStateException("Litematica could not read the file");
+                Object schematic = null;
+                for (var m : sc.getMethods()) {
+                    if (!m.getName().equals("createFromFile") || !java.lang.reflect.Modifier.isStatic(m.getModifiers())) continue;
+                    Class<?>[] pt = m.getParameterTypes();
+                    Object[] args = new Object[pt.length];
+                    boolean ok = true; int strings = 0;
+                    for (int k = 0; k < pt.length; k++) {
+                        if (pt[k] == java.io.File.class) args[k] = path.getParent().toFile();
+                        else if (pt[k] == Path.class) args[k] = path.getParent();
+                        else if (pt[k] == String.class) { args[k] = strings++ == 0 ? path.getFileName().toString() : null; }
+                        else if (pt[k].isPrimitive()) ok = false;
+                        else args[k] = null;
+                    }
+                    if (!ok) continue;
+                    try { schematic = m.invoke(null, args); } catch (Throwable ignored) { schematic = null; }
+                    if (schematic != null) break;
+                }
+                if (schematic == null) throw new IllegalStateException("Litematica could not read the file (no matching createFromFile)");
                 try {
                     Object holder = Class.forName("fi.dy.masa.litematica.data.SchematicHolder").getMethod("getInstance").invoke(null);
                     var add = method(holder.getClass(), "addSchematic", 2);
@@ -1524,10 +1539,12 @@ public final class BuildModules {
                 if (heldStacks(st.getItem()) >= takeStacks.getInt()) continue;   // enough of that one for now
                 if (!fits(st)) { visitFull = true; continue; }
                 int cnt = st.getCount();
+                Item took = st.getItem();   // read it BEFORE the click: the click empties the slot on the client and getItem() would then be air
                 mc.interactionManager.clickSlot(h.syncId, i, 0, SlotActionType.QUICK_MOVE, mc.player);
                 visitTook++;
-                int left = missing.get(st.getItem()) - cnt;
-                if (left <= 0) missing.remove(st.getItem()); else missing.put(st.getItem(), left);
+                Integer need = missing.get(took);
+                int left = (need == null ? 0 : need) - cnt;
+                if (left <= 0) missing.remove(took); else missing.put(took, left);
                 rcd = 2 + (humanize.get() ? (int) Math.round(U.rand(0, 2)) : 0);
                 return true;
             }
@@ -1625,7 +1642,10 @@ public final class BuildModules {
         @Override public void onTick() {
             try { tickInner(); lastErr = ""; }
             catch (Throwable t) {
-                String m = t.getClass().getSimpleName() + (t.getMessage() == null ? "" : ": " + t.getMessage());
+                StackTraceElement at = null;
+                for (StackTraceElement el : t.getStackTrace()) if (el.getClassName().startsWith("nova.")) { at = el; break; }
+                String where = at == null ? "" : " @ " + at.getFileName() + ":" + at.getLineNumber() + " in " + at.getMethodName();
+                String m = t.getClass().getSimpleName() + (t.getMessage() == null ? "" : ": " + t.getMessage()) + where;
                 if (!m.equals(lastErr)) { lastErr = m; U.chat("Schematic error (kept running): " + m); t.printStackTrace(); }
                 stopKeys(); chestPos = null; rcd = 10; cd = 10;
                 if (mc.player != null && mc.currentScreen != null && mc.player.currentScreenHandler != mc.player.playerScreenHandler) mc.player.closeHandledScreen();

@@ -4,7 +4,7 @@ Fabric, Minecraft 1.21.11. Open the GUI with **Right Shift**.
 
 ## Build
 1. https://fabricmc.net/develop -> 1.21.11, copy exact versions into `gradle.properties`.
-2. JDK 21, `gradle build` (needs Gradle 9.x; or `./gradlew build` if you have the wrapper). After building, check the jar is not empty: `unzip -l build/libs/nova-client-2.7.0.jar` must list `fabric.mod.json` and `nova/*.class`. Jar: `build/libs/nova-client-2.7.0.jar` (not `-sources`). Put it in `mods/` with Fabric API.
+2. JDK 21, `gradle build` (needs Gradle 9.x; or `./gradlew build` if you have the wrapper). After building, check the jar is not empty: `unzip -l build/libs/nova-client-2.7.1.jar` must list `fabric.mod.json` and `nova/*.class`. Jar: `build/libs/nova-client-2.7.1.jar` (not `-sources`). Put it in `mods/` with Fabric API.
 
 ## GUI
 Icon tabs on the left, module cards in two columns. Left click = toggle, right click = fold out settings,
@@ -19,6 +19,11 @@ It turns smoothly to each face (Aim speed / Max turn), only clicks when the cros
 "Load into Litematica" (default on) hands the loaded file + origin + rotation to Litematica as a placement, so Litematica renders it (needs the Litematica mod; it follows origin/rotation/offset changes and is removed on Unload).
 "Built-in preview" is the old outline renderer, off by default because it is slow; only use it without Litematica.
 "Auto walk" walks (W + jump, smooth turning) to the nearest spot where the next block can be placed, then places as usual. "Show path" draws the route.
+
+## Changes in 2.7.1
+- **Fixed the restock crash** (`NullPointerException ... Map.get` in handleContainer): after taking a stack out of a chest the game empties the slot on the client, so the item was read as air. It is now read before the click.
+- Builder errors in chat now include file, line and method (`BuildModules.java:1529 in handleContainer`).
+- "Load into Litematica" tries every `createFromFile` variant of the installed Litematica, so it works with newer versions.
 
 ## Changes in 2.7.0
 - **Build fix**: the workflow now arranges the files itself. Loose `.java` files in the repo root are moved into `src/main/java/<package>` (by their `package` line) and `fabric.mod.json` into `src/main/resources`, so uploading everything flat no longer fails with "NovaClient.java is missing". A project that was extracted into a sub-folder is picked up too. `build.gradle`, `settings.gradle` and `gradle.properties` still have to be in the repo root.
